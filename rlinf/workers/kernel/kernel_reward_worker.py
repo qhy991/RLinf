@@ -83,16 +83,25 @@ class KernelRewardWorker(Worker):
         """
         entry_point = self.cfg.reward.get("entry_point", "ModelNew")
         backend = self.cfg.reward.get("backend", "triton")
-        run_correctness = self.cfg.reward.get("run_correctness", True)
-        if run_correctness is None:
-            run_correctness = True
-        run_performance = self.cfg.reward.get("run_performance", True)
-        if run_performance is None:
-            run_performance = True
-        num_perf_trials = self.cfg.reward.get("num_perf_trials", 100)
-        if num_perf_trials is None:
-            num_perf_trials = 100
-        num_perf_trials = int(num_perf_trials)
+        run_correctness = self._get_cfg_bool("run_correctness", True)
+        run_performance = self._get_cfg_bool("run_performance", True)
+        num_perf_trials = int(self._get_cfg_value("num_perf_trials", 100))
+        op_atol = float(self._get_cfg_value("op_atol", 1e-3))
+        op_rtol = float(self._get_cfg_value("op_rtol", 1e-3))
+        warmup_time = int(self._get_cfg_value("warmup_time", 25))
+        rep_time = int(self._get_cfg_value("rep_time", 100))
+        eval_type = self._get_cfg_value("eval_type", "kernelbench")
+        multi_init_settings = self._get_cfg_bool("multi_init_settings", False)
+        multi_input_settings = self._get_cfg_bool("multi_input_settings", False)
+        timeout = int(self._get_cfg_value("timeout", 600))
+        num_correct_trials = int(self._get_cfg_value("num_correct_trials", 5))
+        correctness_first = self._get_cfg_bool("correctness_first", False)
+        skip_torch_eval = self._get_cfg_bool("skip_torch_eval", False)
+        reference_type = self._get_cfg_value("reference_type", "torch_native")
+        isolate_execution = self._get_cfg_bool("isolate_execution", True)
+        backward = self._get_cfg_bool("backward", False)
+        enable_profile = self._get_cfg_bool("enable_profile", False)
+        kernel_output_dir = self.cfg.reward.get("kernel_output_dir")
 
         recv_batch_size = 0
         while recv_batch_size < self.total_batch_size_per_dp:
@@ -109,10 +118,9 @@ class KernelRewardWorker(Worker):
 
                     eval_results = []
                     for index, text in enumerate(texts):
+                        task_meta = self._get_task_metadata(rollout_result, index)
                         kernel_code = self._extract_kernel_code(text)
-                        reference_code = self._get_reference_code(
-                            rollout_result, index
-                        )
+                        reference_code = self._get_reference_code(rollout_result, index)
                         eval_result = self.kernel_eval_worker.evaluate_kernel(
                             kernel_code=kernel_code,
                             reference_code=reference_code,
@@ -121,6 +129,49 @@ class KernelRewardWorker(Worker):
                             run_correctness=run_correctness,
                             run_performance=run_performance,
                             num_perf_trials=num_perf_trials,
+                            task_dir=task_meta.get("task_dir"),
+                            cuda_code_path=task_meta.get("cuda_code_path"),
+                            op_atol=float(task_meta.get("op_atol", op_atol)),
+                            op_rtol=float(task_meta.get("op_rtol", op_rtol)),
+                            warmup_time=int(task_meta.get("warmup_time", warmup_time)),
+                            rep_time=int(task_meta.get("rep_time", rep_time)),
+                            eval_type=task_meta.get("eval_type", eval_type),
+                            multi_init_settings=bool(
+                                task_meta.get("multi_init_settings", multi_init_settings)
+                            ),
+                            multi_input_settings=bool(
+                                task_meta.get(
+                                    "multi_input_settings", multi_input_settings
+                                )
+                            ),
+                            timeout=int(task_meta.get("timeout", timeout)),
+                            num_correct_trials=int(
+                                task_meta.get("num_correct_trials", num_correct_trials)
+                            ),
+                            correctness_first=bool(
+                                task_meta.get("correctness_first", correctness_first)
+                            ),
+                            skip_torch_eval=bool(
+                                task_meta.get("skip_torch_eval", skip_torch_eval)
+                            ),
+                            reference_type=task_meta.get(
+                                "reference_type", reference_type
+                            ),
+                            isolate_execution=bool(
+                                task_meta.get("isolate_execution", isolate_execution)
+                            ),
+                            backward=bool(task_meta.get("backward", backward)),
+                            enable_profile=bool(
+                                task_meta.get("enable_profile", enable_profile)
+                            ),
+                            kernel_output_dir=task_meta.get(
+                                "kernel_output_dir", kernel_output_dir
+                            ),
+                            cuda_filename=task_meta.get("cuda_filename"),
+                            round=task_meta.get("round"),
+                            branch=task_meta.get("branch"),
+                            iter=task_meta.get("iter"),
+                            run_id=task_meta.get("run_id"),
                         )
                         eval_results.append(eval_result)
 
@@ -142,6 +193,20 @@ class KernelRewardWorker(Worker):
         if match:
             return match.group(1).strip()
         return text.strip()
+
+    def _get_cfg_value(self, key: str, default):
+        value = self.cfg.reward.get(key, default)
+        return default if value is None else value
+
+    def _get_cfg_bool(self, key: str, default: bool) -> bool:
+        return bool(self._get_cfg_value(key, default))
+
+    def _get_task_metadata(self, rollout_result: RolloutResult, index: int) -> dict:
+        answers = rollout_result.answers
+        if isinstance(answers, list) and index < len(answers):
+            if isinstance(answers[index], dict):
+                return answers[index]
+        return {}
 
     def _get_reference_code(
         self, rollout_result: RolloutResult, index: int

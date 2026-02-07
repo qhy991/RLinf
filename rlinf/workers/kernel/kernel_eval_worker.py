@@ -14,9 +14,12 @@
 
 from __future__ import annotations
 
-import ast
 import multiprocessing
 import os
+import sys
+import tempfile
+import uuid
+from pathlib import Path
 from typing import Any, Optional
 
 from omegaconf import DictConfig
@@ -45,106 +48,268 @@ def _evaluate_kernel_in_subprocess(
 
 
 def _evaluate_kernel_task(task_data: dict[str, Any]) -> KernelEvalResult:
-    """Evaluate kernel code for compile/correctness/performance.
+    """Evaluate kernel code using robust-kbench primitives."""
+    task_dir = task_data.get("task_dir")
+    if not task_dir:
+        return _error_result("task_dir is required for kernelbench evaluation.")
 
-    This function is intentionally lightweight and should be extended with
-    backend-specific logic (e.g., Triton/CUDA compilation and CUDA timing).
-    """
     kernel_code = task_data.get("kernel_code", "")
-    reference_code = task_data.get("reference_code")
-    backend = task_data.get("backend", "triton")
-    device = task_data.get("device", "cuda:0")
-    run_correctness = task_data.get("run_correctness", True)
-    run_performance = task_data.get("run_performance", True)
-    num_perf_trials = task_data.get("num_perf_trials", 100)
+    cuda_code_path = task_data.get("cuda_code_path")
 
-    if not _compile_kernel(kernel_code, backend):
-        return _error_result("Compilation failed.")
+    try:
+        _ensure_robust_kbench_importable()
+        from robust_kbench.primitives.evaluate import (
+            correct_cuda_kernel,
+            eval_cuda_kernel,
+            eval_torch_runtime,
+            prof_cuda_kernel,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _error_result(f"Failed to import robust-kbench: {exc}")
+
+    def _value(key: str, default: Any) -> Any:
+        value = task_data.get(key, default)
+        return default if value is None else value
+
+    try:
+        cuda_code_path = _prepare_cuda_code_path(
+            task_data=task_data, task_dir=task_dir, cuda_code_path=cuda_code_path
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _error_result(f"Failed to prepare CUDA code: {exc}")
+
+    op_atol = float(_value("op_atol", 1e-3))
+    op_rtol = float(_value("op_rtol", 1e-3))
+    warmup_time = int(_value("warmup_time", 25))
+    repetition_time = int(_value("rep_time", 100))
+    eval_type = _value("eval_type", "kernelbench")
+    multi_init_settings = bool(_value("multi_init_settings", False))
+    multi_input_settings = bool(_value("multi_input_settings", False))
+    timeout = int(_value("timeout", 600))
+    num_correct_trials = int(_value("num_correct_trials", 5))
+    backward = bool(_value("backward", False))
+    correctness_first = bool(_value("correctness_first", False))
+    skip_torch_eval = bool(_value("skip_torch_eval", False))
+    run_correctness = bool(_value("run_correctness", True))
+    run_performance = bool(_value("run_performance", True))
+    enable_profile = bool(_value("enable_profile", False))
+    reference_type = _value("reference_type", "torch_native")
+
+    isolate_execution = bool(_value("isolate_execution", True))
+    if isolate_execution:
+        ext_dir = os.path.join(
+            tempfile.gettempdir(), f"torch_extensions_{uuid.uuid4().hex[:8]}"
+        )
+    else:
+        ext_dir = os.path.expanduser("~/.cache/torch_extensions/py311_cu124")
 
     errors: list[str] = []
+    torch_results = None
+    torch_compile_results = None
+    correct_results = None
+    cuda_results = None
+
+    def _run_torch_eval():
+        return eval_torch_runtime(
+            task_dir=task_dir,
+            multi_init_settings=multi_init_settings,
+            multi_input_settings=multi_input_settings,
+            warmup_time=warmup_time,
+            repetition_time=repetition_time,
+            eval_type=eval_type,
+            timeout=timeout,
+            gpu_id=0,
+            ext_dir=ext_dir,
+            forward=not backward,
+            debug=False,
+        )
+
+    if not skip_torch_eval and not correctness_first:
+        try:
+            torch_results, torch_compile_results = _run_torch_eval()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Torch eval failed: {exc}")
 
     correctness: Optional[bool] = None
     if run_correctness:
         try:
-            correctness = _check_correctness(
-                kernel_code=kernel_code,
-                reference_code=reference_code,
-                backend=backend,
-                device=device,
+            correct_results = correct_cuda_kernel(
+                task_dir=task_dir,
+                cuda_code_path=cuda_code_path,
+                op_atol=op_atol,
+                op_rtol=op_rtol,
+                multi_init_settings=multi_init_settings,
+                multi_input_settings=multi_input_settings,
+                gpu_id=0,
+                ext_dir=ext_dir,
+                forward=not backward,
+                timeout=timeout,
+                num_correct_trials=num_correct_trials,
             )
-        except NotImplementedError as exc:
-            errors.append(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Correctness check failed: {exc}")
+            correct_results = None
+
+        if correct_results and "summary" in correct_results:
+            correctness = bool(correct_results["summary"].get("correct", False))
+        else:
             correctness = False
 
-    kernel_runtime = -1.0
-    if run_performance:
+    if not skip_torch_eval and correctness_first:
         try:
-            kernel_runtime = _measure_performance(
-                kernel_code=kernel_code,
-                backend=backend,
-                device=device,
-                num_trials=num_perf_trials,
-            )
-        except NotImplementedError as exc:
-            errors.append(str(exc))
+            torch_results, torch_compile_results = _run_torch_eval()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Torch eval failed: {exc}")
 
-    reference_runtime = task_data.get("reference_runtime", -1.0)
+    if run_performance and (not run_correctness or correctness):
+        try:
+            cuda_results = eval_cuda_kernel(
+                task_dir=task_dir,
+                cuda_code_path=cuda_code_path,
+                warmup_time=warmup_time,
+                repetition_time=repetition_time,
+                eval_type=eval_type,
+                multi_init_settings=multi_init_settings,
+                multi_input_settings=multi_input_settings,
+                gpu_id=0,
+                ext_dir=ext_dir,
+                timeout=timeout,
+                forward=not backward,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Performance eval failed: {exc}")
+
+    if enable_profile and (not run_correctness or correctness):
+        try:
+            prof_cuda_kernel(
+                cuda_code_path=cuda_code_path,
+                task_dir=task_dir,
+                gpu_id=0,
+                ext_dir=ext_dir,
+                torch_prof=True,
+                ncu_prof=True,
+                clang_tidy=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Profiling failed: {exc}")
+
+    kernel_runtime = -1.0
+    if cuda_results and "summary" in cuda_results:
+        kernel_runtime = float(cuda_results["summary"].get("avg_mean_time", -1.0))
+        if kernel_runtime > 0:
+            kernel_runtime *= 1000.0
+
+    reference_runtime = -1.0
+    if reference_type == "torch_compile":
+        ref = torch_compile_results
+    else:
+        ref = torch_results
+    if ref and "summary" in ref:
+        reference_runtime = float(ref["summary"].get("avg_mean_time", -1.0))
+        if reference_runtime > 0:
+            reference_runtime *= 1000.0
+
     speedup = 0.0
     if reference_runtime > 0 and kernel_runtime > 0:
         speedup = reference_runtime / kernel_runtime
 
+    compiled = False
+    if run_correctness:
+        compiled = correct_results is not None
+    elif run_performance:
+        compiled = cuda_results is not None
+    else:
+        compiled = bool(kernel_code or cuda_code_path)
+
     result: KernelEvalResult = {
-        "compiled": True,
+        "compiled": compiled,
         "correctness": correctness,
         "kernel_runtime": kernel_runtime,
         "reference_runtime": reference_runtime,
         "speedup": speedup,
+        "cuda_code_path": cuda_code_path,
     }
     if errors:
         result["error_message"] = "; ".join(errors)
     return result
 
 
-def _compile_kernel(kernel_code: str, backend: str) -> bool:
-    """Compile kernel code.
-
-    TODO(agent): Replace the syntax-only check with real backend compilation.
-    """
-    if not kernel_code:
-        return False
-    if backend not in {"triton", "cuda"}:
-        raise ValueError(f"Unsupported backend: {backend}")
+def _ensure_robust_kbench_importable() -> None:
+    """Ensure robust-kbench is importable without manual install."""
     try:
-        ast.parse(kernel_code)
-    except SyntaxError:
-        return False
-    return True
+        import robust_kbench  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "robust-kbench"
+        if candidate.exists():
+            sys.path.insert(0, str(candidate))
+            return
+    raise ModuleNotFoundError(
+        "robust_kbench is not importable and robust-kbench directory was not found."
+    )
 
 
-def _check_correctness(
-    kernel_code: str,
-    reference_code: Optional[str],
-    backend: str,
-    device: str,
-) -> bool:
-    """Check kernel correctness.
+def _prepare_cuda_code_path(
+    task_data: dict[str, Any],
+    task_dir: str,
+    cuda_code_path: Optional[str],
+) -> str:
+    kernel_code = task_data.get("kernel_code", "")
+    overwrite_cuda = bool(task_data.get("overwrite_cuda", True))
 
-    TODO(agent): Implement correctness checks against a reference kernel.
-    """
-    raise NotImplementedError("Kernel correctness check is not implemented yet.")
+    if cuda_code_path:
+        if kernel_code and (overwrite_cuda or not os.path.exists(cuda_code_path)):
+            _write_cuda_code(cuda_code_path, kernel_code)
+        if not os.path.exists(cuda_code_path):
+            raise FileNotFoundError(f"cuda_code_path not found: {cuda_code_path}")
+        return cuda_code_path
+
+    if not kernel_code:
+        raise ValueError("kernel_code or cuda_code_path must be provided.")
+
+    output_root = task_data.get(
+        "kernel_output_dir",
+        os.path.join(tempfile.gettempdir(), "rlinf_kernel_eval"),
+    )
+    round_num = task_data.get("round")
+    branch_num = task_data.get("branch")
+    iter_id = task_data.get("iter")
+    if iter_id is None:
+        iter_id = task_data.get("iteration")
+    if iter_id is None:
+        iter_id = task_data.get("iter_id")
+
+    if round_num is not None and branch_num is not None:
+        if iter_id is None:
+            iter_id = uuid.uuid4().hex[:8]
+        base_dir = os.path.join(
+            output_root,
+            f"round{round_num}",
+            f"branch{branch_num}",
+            f"iter_{iter_id}",
+        )
+    else:
+        run_id = task_data.get("run_id") or uuid.uuid4().hex[:8]
+        task_name = task_data.get("task_name") or os.path.basename(task_dir)
+        base_dir = os.path.join(output_root, task_name, run_id)
+
+    os.makedirs(base_dir, exist_ok=True)
+    filename = task_data.get("cuda_filename") or "kernel.cu"
+    cuda_code_path = os.path.join(base_dir, filename)
+    _write_cuda_code(cuda_code_path, kernel_code)
+    return cuda_code_path
 
 
-def _measure_performance(
-    kernel_code: str,
-    backend: str,
-    device: str,
-    num_trials: int,
-) -> float:
-    """Measure kernel performance in milliseconds.
-
-    TODO(agent): Implement CUDA timing with warmup and multiple trials.
-    """
-    raise NotImplementedError("Kernel performance measurement is not implemented yet.")
+def _write_cuda_code(cuda_code_path: str, kernel_code: str) -> None:
+    os.makedirs(os.path.dirname(cuda_code_path), exist_ok=True)
+    with open(cuda_code_path, "w", encoding="utf-8") as f:
+        if kernel_code and not kernel_code.endswith("\n"):
+            kernel_code += "\n"
+        f.write(kernel_code)
 
 
 def _error_result(message: str) -> KernelEvalResult:
@@ -248,6 +413,30 @@ class KernelEvalClient:
         run_correctness: bool = True,
         run_performance: bool = True,
         num_perf_trials: int = 100,
+        task_dir: Optional[str] = None,
+        cuda_code_path: Optional[str] = None,
+        op_atol: float = 1e-3,
+        op_rtol: float = 1e-3,
+        warmup_time: int = 25,
+        rep_time: int = 100,
+        eval_type: str = "kernelbench",
+        multi_init_settings: bool = False,
+        multi_input_settings: bool = False,
+        timeout: int = 600,
+        num_correct_trials: int = 5,
+        correctness_first: bool = False,
+        skip_torch_eval: bool = False,
+        reference_type: str = "torch_native",
+        isolate_execution: bool = True,
+        backward: bool = False,
+        enable_profile: bool = False,
+        kernel_output_dir: Optional[str] = None,
+        cuda_filename: Optional[str] = None,
+        round: Optional[int] = None,
+        branch: Optional[int] = None,
+        iter: Optional[int] = None,
+        run_id: Optional[str] = None,
+        overwrite_cuda: bool = True,
     ) -> KernelEvalResult:
         """Evaluate a kernel with subprocess isolation."""
         if device is None:
@@ -261,6 +450,30 @@ class KernelEvalClient:
             "run_correctness": run_correctness,
             "run_performance": run_performance,
             "num_perf_trials": num_perf_trials,
+            "task_dir": task_dir,
+            "cuda_code_path": cuda_code_path,
+            "op_atol": op_atol,
+            "op_rtol": op_rtol,
+            "warmup_time": warmup_time,
+            "rep_time": rep_time,
+            "eval_type": eval_type,
+            "multi_init_settings": multi_init_settings,
+            "multi_input_settings": multi_input_settings,
+            "timeout": timeout,
+            "num_correct_trials": num_correct_trials,
+            "correctness_first": correctness_first,
+            "skip_torch_eval": skip_torch_eval,
+            "reference_type": reference_type,
+            "isolate_execution": isolate_execution,
+            "backward": backward,
+            "enable_profile": enable_profile,
+            "kernel_output_dir": kernel_output_dir,
+            "cuda_filename": cuda_filename,
+            "round": round,
+            "branch": branch,
+            "iter": iter,
+            "run_id": run_id,
+            "overwrite_cuda": overwrite_cuda,
         }
         try:
             if self.worker_pool is None:
@@ -314,6 +527,30 @@ class KernelEvalWorker(Worker):
         run_correctness: bool = True,
         run_performance: bool = True,
         num_perf_trials: int = 100,
+        task_dir: Optional[str] = None,
+        cuda_code_path: Optional[str] = None,
+        op_atol: float = 1e-3,
+        op_rtol: float = 1e-3,
+        warmup_time: int = 25,
+        rep_time: int = 100,
+        eval_type: str = "kernelbench",
+        multi_init_settings: bool = False,
+        multi_input_settings: bool = False,
+        timeout: int = 600,
+        num_correct_trials: int = 5,
+        correctness_first: bool = False,
+        skip_torch_eval: bool = False,
+        reference_type: str = "torch_native",
+        isolate_execution: bool = True,
+        backward: bool = False,
+        enable_profile: bool = False,
+        kernel_output_dir: Optional[str] = None,
+        cuda_filename: Optional[str] = None,
+        round: Optional[int] = None,
+        branch: Optional[int] = None,
+        iter: Optional[int] = None,
+        run_id: Optional[str] = None,
+        overwrite_cuda: bool = True,
     ) -> KernelEvalResult:
         """Evaluate a kernel in a subprocess.
 
@@ -340,6 +577,30 @@ class KernelEvalWorker(Worker):
                 run_correctness=run_correctness,
                 run_performance=run_performance,
                 num_perf_trials=num_perf_trials,
+                task_dir=task_dir,
+                cuda_code_path=cuda_code_path,
+                op_atol=op_atol,
+                op_rtol=op_rtol,
+                warmup_time=warmup_time,
+                rep_time=rep_time,
+                eval_type=eval_type,
+                multi_init_settings=multi_init_settings,
+                multi_input_settings=multi_input_settings,
+                timeout=timeout,
+                num_correct_trials=num_correct_trials,
+                correctness_first=correctness_first,
+                skip_torch_eval=skip_torch_eval,
+                reference_type=reference_type,
+                isolate_execution=isolate_execution,
+                backward=backward,
+                enable_profile=enable_profile,
+                kernel_output_dir=kernel_output_dir,
+                cuda_filename=cuda_filename,
+                round=round,
+                branch=branch,
+                iter=iter,
+                run_id=run_id,
+                overwrite_cuda=overwrite_cuda,
             )
         except Exception as exc:  # noqa: BLE001
             self.log_error(f"Kernel evaluation failed: {exc}")

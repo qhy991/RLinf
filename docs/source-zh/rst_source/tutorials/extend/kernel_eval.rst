@@ -47,10 +47,15 @@
 --------
 
 1. 在入口脚本中使用 ``get_reward_worker(cfg)`` 选择 ``KernelRewardWorker``。
-2. ``KernelRewardWorker`` 默认使用进程内评估器（``KernelEvalClient``），但仍会通过子进程隔离执行。
-3. （可选）启动独立的 ``KernelEvalWorker`` 作为评估通道，以便自定义调度。
-4. 根据训练流程选择 ``KernelRunner`` 或现有 reasoning runner。
+2. ``KernelRewardWorker`` 需要每个样本在 ``answers`` 中提供 ``task_dir``（字典形式），例如::
+
+     answers = [{"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}]
+
+3. ``KernelRewardWorker`` 默认使用进程内评估器（``KernelEvalClient``），但仍会通过子进程隔离执行。
+4. （可选）启动独立的 ``KernelEvalWorker`` 作为评估通道，以便自定义调度。
+5. 根据训练流程选择 ``KernelRunner`` 或现有 reasoning runner。
 
 .. note::
-   ``rlinf/workers/kernel/kernel_eval_worker.py`` 中的编译、正确性与性能测量
-   目前为占位逻辑，请在真实 GPU 评估前完成后端实现。
+   评估逻辑已经改为调用 robust-kbench 的评估接口（``correct_cuda_kernel`` /
+   ``eval_cuda_kernel`` / ``eval_torch_runtime``）。请确保 GPU 机器上能导入
+   ``robust-kbench``（安装或与 ``RLinf`` 同级目录放置）。

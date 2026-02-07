@@ -48,13 +48,19 @@ Usage Notes
 -----------
 
 1. In your entrypoint, use ``get_reward_worker(cfg)`` to select ``KernelRewardWorker``.
-2. ``KernelRewardWorker`` uses an in-process evaluator by default (``KernelEvalClient``)
+2. ``KernelRewardWorker`` expects each sample to include a ``task_dir`` in ``answers``
+   (as a dict). Example::
+
+     answers = [{"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}]
+
+3. ``KernelRewardWorker`` uses an in-process evaluator by default (``KernelEvalClient``)
    that still executes kernels in subprocesses for isolation.
-3. (Optional) Launch ``KernelEvalWorker`` as a separate group if you want a dedicated
+4. (Optional) Launch ``KernelEvalWorker`` as a separate group if you want a dedicated
    evaluation channel and custom orchestration.
 3. Use ``KernelRunner`` or the standard reasoning runner depending on your training flow.
 
 .. note::
-   The compile, correctness, and performance hooks in
-   ``rlinf/workers/kernel/kernel_eval_worker.py`` are stubs. Implement backend-specific
-   logic before running real GPU evaluations.
+   The evaluator now calls robust-kbench primitives (``correct_cuda_kernel``,
+   ``eval_cuda_kernel``, ``eval_torch_runtime``). Make sure ``robust-kbench`` is
+   available on the GPU machine (either install it or keep it as a sibling folder
+   next to ``RLinf``).
