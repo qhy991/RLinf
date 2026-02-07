@@ -28,7 +28,7 @@ from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelEvalComponentPlacement
 from rlinf.utils.utils import output_redirector
 from rlinf.workers.agent.tool_worker import ToolWorkerInfo
-from rlinf.workers.reward.reward_worker import RewardWorker
+from rlinf.workers.reward.utils import get_reward_worker
 from rlinf.workers.rollout.utils import get_rollout_backend_worker
 
 """Script to start GRPO training"""
@@ -76,7 +76,8 @@ def main(cfg) -> None:
 
     # Reward group
     reward_placement_strategy = component_placement.get_strategy("reward")
-    reward_group = RewardWorker.create_group(cfg, component_placement).launch(
+    reward_worker_cls = get_reward_worker(cfg)
+    reward_group = reward_worker_cls.create_group(cfg, component_placement).launch(
         cluster,
         name=cfg.reward.group_name,
         placement_strategy=reward_placement_strategy,

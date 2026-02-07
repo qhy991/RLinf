@@ -38,6 +38,11 @@ class RewardWorker(Worker):
     def init_worker(self):
         if self.cfg.reward.use_reward_model:
             raise NotImplementedError("Reward model is not implemented yet.")
+        if self.cfg.reward.reward_type == "kernel":
+            raise ValueError(
+                "Kernel reward requires KernelRewardWorker. "
+                "Use get_reward_worker in your entrypoint."
+            )
         else:
             self.reward = get_reward_class(self.cfg.reward.reward_type)(self.cfg.reward)
 
