@@ -331,30 +331,48 @@ class ReasoningRunner:
         prompt_ids = batch["prompt"].tolist()
         lengths = batch["length"].tolist()
         answers = batch["answer"]
+        meta_list = batch.get("meta")
+        
+        # For kernel tasks, merge metadata into answers for backward compatibility
+        # but also keep original meta for direct access
         if (
             self.cfg.reward.reward_type == "kernel"
-            and (meta_list := batch.get("meta")) is not None
+            and meta_list is not None
         ):
             answers = self._merge_kernel_metadata(answers, meta_list)
+        
         image_data = batch["image_data"]
         multi_modal_inputs = batch["multi_modal_inputs"]
         prompt_ids = [ids[-pmp_len:] for ids, pmp_len in zip(prompt_ids, lengths)]
         rollout_dp_size = self.component_placement.rollout_dp_size
 
-        for input_ids, answers, image_data, multi_modal_inputs in zip(
-            split_list(prompt_ids, rollout_dp_size, enforce_divisible_batch=False),
-            split_list(answers, rollout_dp_size, enforce_divisible_batch=False),
-            split_list(image_data, rollout_dp_size, enforce_divisible_batch=False),
-            split_list(
-                multi_modal_inputs, rollout_dp_size, enforce_divisible_batch=False
-            ),
+        # Split all lists
+        prompt_ids_splits = split_list(prompt_ids, rollout_dp_size, enforce_divisible_batch=False)
+        answers_splits = split_list(answers, rollout_dp_size, enforce_divisible_batch=False)
+        image_data_splits = split_list(image_data, rollout_dp_size, enforce_divisible_batch=False)
+        multi_modal_inputs_splits = split_list(
+            multi_modal_inputs, rollout_dp_size, enforce_divisible_batch=False
+        )
+        meta_splits = (
+            split_list(meta_list, rollout_dp_size, enforce_divisible_batch=False)
+            if meta_list is not None
+            else [None] * len(prompt_ids_splits)
+        )
+
+        for input_ids, answers_split, image_data_split, multi_modal_inputs_split, meta_split in zip(
+            prompt_ids_splits,
+            answers_splits,
+            image_data_splits,
+            multi_modal_inputs_splits,
+            meta_splits,
         ):
             request = RolloutRequest(
                 n=self.cfg.algorithm.group_size,
                 input_ids=input_ids,
-                answers=answers,
-                image_data=image_data,
-                multi_modal_inputs=multi_modal_inputs,
+                answers=answers_split,
+                image_data=image_data_split,
+                multi_modal_inputs=multi_modal_inputs_split,
+                meta=meta_split,
             )
             self.dataloader_channel.put(request, async_op=True)
 

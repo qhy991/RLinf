@@ -1,0 +1,2 @@
+{"prompt": "请根据 KernelBench 任务生成 CUDA kernel。任务要求实现一个高效的矩阵乘法操作。\n\n请生成完整的 CUDA kernel 代码，包括必要的头文件和 kernel 函数实现。", "answer": "__global__ void matmul_kernel(...)", "meta": {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}}
+{"prompt": "请生成 CUDA kernel 代码，实现一个优化的向量加法操作。代码应该包含 kernel 函数定义和必要的 CUDA 配置。", "answer": "__global__ void vector_add_kernel(...)", "meta": {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_9", "round": 1, "branch": 0, "iter": 3}}

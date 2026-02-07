@@ -202,6 +202,21 @@ class KernelRewardWorker(Worker):
         return bool(self._get_cfg_value(key, default))
 
     def _get_task_metadata(self, rollout_result: RolloutResult, index: int) -> dict:
+        """Get task metadata from meta field or merged answers.
+        
+        Priority:
+        1. If RolloutResult has a meta field, use meta[index]
+        2. Otherwise, check if answers[index] is a dict (meta was merged into answers)
+        3. Return empty dict if not found
+        """
+        # First, try to get from meta field if it exists
+        if hasattr(rollout_result, "meta") and rollout_result.meta is not None:
+            meta_list = rollout_result.meta
+            if isinstance(meta_list, list) and index < len(meta_list):
+                if isinstance(meta_list[index], dict):
+                    return meta_list[index]
+        
+        # Fallback: check if meta was merged into answers
         answers = rollout_result.answers
         if isinstance(answers, list) and index < len(answers):
             if isinstance(answers[index], dict):
@@ -211,7 +226,13 @@ class KernelRewardWorker(Worker):
     def _get_reference_code(
         self, rollout_result: RolloutResult, index: int
     ) -> Optional[str]:
-        """Get reference code from rollout result if available."""
+        """Get reference code from rollout result if available.
+        
+        Priority:
+        1. If answers[index] is a dict, get reference_code from it
+        2. If answers[index] is a string (CUDA code), use it as reference_code
+        3. If answers[index] is a list, use the first element
+        """
         answers = rollout_result.answers
         if answers is None or not isinstance(answers, list):
             return None
@@ -219,10 +240,12 @@ class KernelRewardWorker(Worker):
             return None
         reference = answers[index]
         if isinstance(reference, dict):
+            # If it's a dict, get reference_code (which may have been set from original answer string)
             return reference.get("reference_code")
         if isinstance(reference, list):
             return reference[0] if reference else None
         if isinstance(reference, str):
+            # If answer is a string (CUDA code), use it as reference_code
             return reference
         return None
 

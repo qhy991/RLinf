@@ -63,6 +63,7 @@ class RolloutRequest:
     image_data: Union[list[list[bytes]], list[list[str]]]
     answers: list[Union[list[str], dict]]
     multi_modal_inputs: list[Optional[dict]]
+    meta: Optional[list[Optional[dict]]] = None  # Metadata for each sample (e.g., task_dir for kernel tasks)
 
     def to_seq_group_infos(self) -> list["SeqGroupInfo"]:
         """Convert the RolloutRequest into a list of SeqGroupInfo objects.
@@ -70,6 +71,7 @@ class RolloutRequest:
         Returns:
             list[SeqGroupInfo]: A list of SeqGroupInfo objects.
         """
+        meta_list = self.meta if self.meta is not None else [None] * len(self.input_ids)
         return [
             SeqGroupInfo(
                 id=uuid.uuid4().int,
@@ -78,12 +80,14 @@ class RolloutRequest:
                 group_size=self.n,
                 image_data=image_data,
                 multi_modal_inputs=multi_modal_inputs,
+                meta=meta,
             )
-            for input_ids, answer, image_data, multi_modal_inputs in zip(
+            for input_ids, answer, image_data, multi_modal_inputs, meta in zip(
                 self.input_ids,
                 self.answers,
                 self.image_data,
                 self.multi_modal_inputs,
+                meta_list,
                 strict=True,
             )
         ]
@@ -123,6 +127,7 @@ class SeqGroupInfo:
     )
     image_data: Optional[list] = None
     multi_modal_inputs: Optional[dict] = None
+    meta: Optional[dict] = None  # Metadata for the sequence (e.g., task_dir for kernel tasks)
 
     def __post_init__(self):
         assert self.group_size > 0, "group_size must be greater than 0"
@@ -232,6 +237,7 @@ class RolloutResult:
     answers: Optional[list[str | dict]] = None
     image_data: Optional[Union[list[list[bytes]], list[list[str]]]] = None
     multi_modal_inputs: Optional[list[dict]] = None
+    meta: Optional[list[dict]] = None  # Metadata for each sample (e.g., task_dir for kernel tasks)
     response_mask: Optional[list[list[int]]] = None
     # Inference
     # Logprobs returned by rollout engines
@@ -426,7 +432,7 @@ class RolloutResult:
 
     @classmethod
     def from_sglang_seq_group(cls, seq_group: SeqGroupInfo, return_logprobs: bool):
-        return cls.from_sglang_results(
+        result = cls.from_sglang_results(
             seq_group.results,
             seq_group.group_size,
             [seq_group.input_ids] * seq_group.group_size,
@@ -435,6 +441,10 @@ class RolloutResult:
             multi_modal_inputs=[seq_group.multi_modal_inputs] * seq_group.group_size,
             return_logprobs=return_logprobs,
         )
+        # Pass meta field if available
+        if seq_group.meta is not None:
+            result.meta = [seq_group.meta] * seq_group.group_size
+        return result
 
     @classmethod
     def from_vllm_seq_group(cls, seq_group: SeqGroupInfo, return_logprobs: bool):
