@@ -122,6 +122,7 @@ def tp_reshard_fn_qwen3_dense(model_state_dict, merge_factor, tp_group):
         "final_layernorm.weight",
         "q_layernorm.weight",
         "k_layernorm.weight",
+        "input_layernorm.weight",  # Qwen3 dense model has input_layernorm
         "pre_mlp_layernorm.weight",
         "router.weight",
     ]
