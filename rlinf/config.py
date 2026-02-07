@@ -269,7 +269,8 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
                 cfg.model.seq_len_interpolation_factor = None
         cfg.model.padded_vocab_size = hf_config.vocab_size
         cfg.model.max_position_embeddings = hf_config.max_position_embeddings
-        cfg.model.rotary_base = hf_config.rope_theta
+        # Qwen3 may use rope_theta, fallback to default if not available
+        cfg.model.rotary_base = getattr(hf_config, 'rope_theta', 10000)
         cfg.model.share_embeddings_and_output_weights = getattr(
             hf_config, "tie_word_embeddings", False
         )

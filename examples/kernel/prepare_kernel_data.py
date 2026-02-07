@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 
-DEFAULT_PROMPT_TEMPLATE = """你是 CUDA 专家。请根据下面的 PyTorch 参考实现生成等价的 CUDA 扩展代码（forward.cu）。
+DEFAULT_PROMPT_TEMPLATE = """请根据下面的 PyTorch 参考实现生成等价的 CUDA C++ 扩展代码。
 
 任务描述：
 {operation_info}
@@ -57,10 +57,15 @@ PyTorch forward_fn:
 {config_str}
 
 要求：
-1. 输出完整的 CUDA C++ 扩展代码（forward.cu），包含必要的头文件。
-2. 实现 torch::Tensor forward(...)，参数与 forward_fn 的输入保持一致。
-3. 使用 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) 导出 forward。
-4. 只输出 CUDA 代码，不要输出解释文字。
+1. 只输出完整的 CUDA C++ 扩展代码，不要输出任何解释文字。
+2. 代码必须包含：
+   - 必要的头文件（#include <torch/extension.h>, #include <cuda_runtime.h> 等）
+   - template kernel 函数（__global__ void ...）
+   - torch::Tensor forward(...) 函数，参数与 forward_fn 的输入保持一致
+   - PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) 导出 forward
+3. 代码格式必须可以直接编译使用。
+
+请直接输出代码：
 """
 
 
