@@ -1,6 +1,6 @@
 # Kernel 训练数据准备指南
 
-本指南说明如何准备用于 RLinf kernel 训练的数据，确保每条样本的 `answers` 字段包含 `task_dir`。
+本指南说明如何准备用于 RLinf kernel 训练的数据，确保每条样本的 `meta.task_dir` 指向 kernelbench 任务目录。
 
 ## 数据格式要求
 
@@ -11,15 +11,16 @@
 ```json
 {
   "prompt": "你的 prompt 文本",
-  "answer": {
+  "answer": "__global__ void ...",
+  "meta": {
     "task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"
   }
 }
 ```
 
-### 完整的 answer 字典示例
+### 完整的 meta 字段示例
 
-`answer` 字段应该是一个字典，可以包含以下字段：
+`meta` 字段可以包含以下字段：
 
 ```json
 {
@@ -43,11 +44,30 @@
 }
 ```
 
-**注意**：`task_dir` 是**必需**的字段，其他字段都是可选的。
+**注意**：`meta.task_dir` 是**必需**的字段，其他字段都是可选的。
 
 ## 使用数据准备脚本
 
-我们提供了一个示例脚本来帮助你准备数据：
+我们提供了一个示例脚本来帮助你准备数据。
+
+**方式 A：直接从 kernelbench 任务自动生成（推荐）**
+```bash
+python examples/kernel/prepare_kernel_data.py \
+    --from_kernelbench_tasks \
+    --output_data /path/to/output_data.jsonl \
+    --robust_kbench_root /path/to/robust-kbench
+```
+
+如需自定义 prompt 模板：
+```bash
+python examples/kernel/prepare_kernel_data.py \
+    --from_kernelbench_tasks \
+    --output_data /path/to/output_data.jsonl \
+    --robust_kbench_root /path/to/robust-kbench \
+    --prompt_template_path /path/to/prompt_template.txt
+```
+
+**方式 B：从已有数据补充 meta**
 
 ```bash
 python examples/kernel/prepare_kernel_data.py \
@@ -60,7 +80,7 @@ python examples/kernel/prepare_kernel_data.py \
 
 脚本会：
 1. 读取原始数据文件（JSONL 格式）
-2. 为每条样本构建包含 `task_dir` 的 `answer` 字典
+2. 为每条样本构建包含 `task_dir` 的 `meta` 字典
 3. 验证 `task_dir` 路径是否存在
 4. 输出处理后的数据文件
 
@@ -82,9 +102,10 @@ import json
 # 示例：准备一条样本
 sample = {
     "prompt": "Write a CUDA kernel for matrix multiplication...",
-    "answer": {
+    "answer": "__global__ void ...",
+    "meta": {
         "task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"
-    }
+    },
 }
 
 # 写入 JSONL 文件
@@ -102,17 +123,16 @@ import json
 with open("kernel_data.jsonl", "r") as f:
     for idx, line in enumerate(f, 1):
         item = json.loads(line.strip())
-        answer = item.get("answer", {})
-        
-        if not isinstance(answer, dict):
-            print(f"Error at line {idx}: answer must be a dict")
+        meta = item.get("meta", {})
+        if not isinstance(meta, dict):
+            print(f"Error at line {idx}: meta must be a dict")
             continue
-            
-        if "task_dir" not in answer:
-            print(f"Error at line {idx}: missing 'task_dir' in answer")
+
+        if "task_dir" not in meta:
+            print(f"Error at line {idx}: missing 'task_dir' in meta")
             continue
-            
-        task_dir = answer["task_dir"]
+
+        task_dir = meta["task_dir"]
         if not os.path.exists(task_dir):
             print(f"Warning at line {idx}: task_dir does not exist: {task_dir}")
 ```
@@ -130,6 +150,7 @@ data:
     - /path/to/kernel_val_data.jsonl
   prompt_key: prompt
   answer_key: answer
+  meta_key: meta
   max_prompt_length: 2048
   apply_chat_template: false  # 根据你的模型调整
 ```

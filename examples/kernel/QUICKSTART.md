@@ -16,7 +16,7 @@
    
    或者将 `robust-kbench` 放在与 `RLinf` 同级的目录。
 
-2. **准备数据集**：确保数据集中的 `answers` 字段包含 `task_dir`
+2. **准备数据集**：确保数据集中的 `meta.task_dir` 指向 kernelbench 任务目录
 
 ## 快速开始（3 步）
 
@@ -24,12 +24,31 @@
 
 每条样本的格式：
 ```json
-{"prompt": "请根据 KernelBench 任务生成 CUDA kernel ...", "answer": {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}}
+{"prompt": "请根据 KernelBench 任务生成 CUDA kernel ...", "answer": "__global__ void ...", "meta": {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}}
 ```
 
 **最小测试数据集**：`examples/kernel/kernelbench_minimal.jsonl`
 
-你可以使用数据准备脚本：
+你可以使用数据准备脚本（两种方式）：
+
+**方式 A：直接从 kernelbench 任务自动生成（推荐）**
+```bash
+python examples/kernel/prepare_kernel_data.py \
+    --from_kernelbench_tasks \
+    --output_data /path/to/kernelbench_train.jsonl \
+    --robust_kbench_root /path/to/robust-kbench
+```
+
+如需自定义 prompt 模板：
+```bash
+python examples/kernel/prepare_kernel_data.py \
+    --from_kernelbench_tasks \
+    --output_data /path/to/kernelbench_train.jsonl \
+    --robust_kbench_root /path/to/robust-kbench \
+    --prompt_template_path /path/to/prompt_template.txt
+```
+
+**方式 B：从已有数据补充 meta**
 ```bash
 python examples/kernel/prepare_kernel_data.py \
     --input_data /path/to/raw_data.jsonl \
@@ -54,6 +73,7 @@ data:
   type: math
   prompt_key: prompt
   answer_key: answer
+  meta_key: meta
   train_data_paths: ["/path/to/your/kernelbench_train.jsonl"]
   val_data_paths: ["/path/to/your/kernelbench_val.jsonl"]
 
@@ -116,13 +136,14 @@ python examples/reasoning/main_grpo.py \
 ### 必需的字段
 
 - `prompt`：输入提示文本
-- `answer.task_dir`：robust-kbench 任务目录路径（**必需**）
+- `answer`：CUDA 代码字符串（可以为空，训练时由模型生成）
+- `meta.task_dir`：robust-kbench 任务目录路径（**必需**）
 
-### 可选的字段（覆盖配置默认值）
+### 可选的字段（覆盖配置默认值，放在 `meta` 下）
 
 ```json
 {
-  "answer": {
+  "meta": {
     "task_dir": "/path/to/task_7",
     "cuda_code_path": "/path/to/kernel.cu",  // 可选
     "round": 1,  // 可选
@@ -154,8 +175,8 @@ A: `task_dir` 应该指向 robust-kbench 中的具体任务目录，例如：
 ### Q: 训练时出现 "task_dir is required" 错误？
 
 A: 确保：
-1. 数据集中每条样本的 `answer` 是字典格式
-2. `answer` 中包含 `task_dir` 字段
+1. 数据集中每条样本有 `meta` 字段
+2. `meta` 中包含 `task_dir` 字段
 3. `task_dir` 路径存在且可访问
 
 ### Q: 如何查看生成的 kernel 文件？

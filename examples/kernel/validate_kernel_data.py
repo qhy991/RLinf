@@ -13,7 +13,11 @@
 # limitations under the License.
 
 """
-验证 kernel 训练数据格式
+验证 kernel 训练数据格式。
+
+当前推荐格式：
+  - answer: CUDA 代码字符串（可为空，模型会生成）
+  - meta.task_dir: 指向 robust-kbench 任务目录
 
 使用方法：
     python validate_kernel_data.py --data_path /path/to/kernel_data.jsonl
@@ -25,7 +29,12 @@ import os
 from pathlib import Path
 
 
-def validate_kernel_data(data_path: str, prompt_key: str = "prompt", answer_key: str = "answer") -> bool:
+def validate_kernel_data(
+    data_path: str,
+    prompt_key: str = "prompt",
+    answer_key: str = "answer",
+    meta_key: str = "meta",
+) -> bool:
     """
     验证 kernel 训练数据格式。
 
@@ -33,6 +42,7 @@ def validate_kernel_data(data_path: str, prompt_key: str = "prompt", answer_key:
         data_path: 数据文件路径（JSONL 格式）
         prompt_key: prompt 字段的键名
         answer_key: answer 字段的键名
+        meta_key: meta 字段的键名
 
     Returns:
         bool: 如果所有样本都有效则返回 True，否则返回 False
@@ -65,19 +75,42 @@ def validate_kernel_data(data_path: str, prompt_key: str = "prompt", answer_key:
 
             answer = item[answer_key]
 
-            # 检查 answer 是否为字典
-            if not isinstance(answer, dict):
+            # 检查 answer 是否为字符串或字典（兼容旧格式）
+            if not isinstance(answer, (str, dict)):
                 errors.append(
-                    f"Line {idx}: '{answer_key}' must be a dict, got {type(answer).__name__}"
+                    f"Line {idx}: '{answer_key}' must be a string or dict, got {type(answer).__name__}"
                 )
                 continue
 
-            # 检查 task_dir 字段
-            if "task_dir" not in answer:
-                errors.append(f"Line {idx}: Missing 'task_dir' in '{answer_key}'")
+            if isinstance(answer, str) and not answer.strip():
+                warnings.append(f"Line {idx}: '{answer_key}' is empty; model must generate CUDA code.")
+
+            # 检查 meta/task_dir
+            meta = item.get(meta_key, {})
+            task_dir = None
+            if meta is not None:
+                if not isinstance(meta, dict):
+                    errors.append(
+                        f"Line {idx}: '{meta_key}' must be a dict if provided, got {type(meta).__name__}"
+                    )
+                    continue
+                task_dir = meta.get("task_dir")
+
+            if task_dir is None and isinstance(answer, dict):
+                # 兼容旧格式：task_dir 放在 answer 里
+                task_dir = answer.get("task_dir")
+                if task_dir is not None:
+                    warnings.append(
+                        f"Line {idx}: task_dir found in '{answer_key}' (legacy format). "
+                        f"Recommend moving it to '{meta_key}'."
+                    )
+
+            if task_dir is None:
+                errors.append(
+                    f"Line {idx}: Missing 'task_dir' in '{meta_key}' (or legacy '{answer_key}')"
+                )
                 continue
 
-            task_dir = answer["task_dir"]
             if not isinstance(task_dir, str):
                 errors.append(
                     f"Line {idx}: 'task_dir' must be a string, got {type(task_dir).__name__}"
@@ -156,6 +189,12 @@ def main():
         default="answer",
         help="Key name for answer in data (default: 'answer')",
     )
+    parser.add_argument(
+        "--meta_key",
+        type=str,
+        default="meta",
+        help="Key name for meta in data (default: 'meta')",
+    )
 
     args = parser.parse_args()
 
@@ -163,6 +202,7 @@ def main():
         data_path=args.data_path,
         prompt_key=args.prompt_key,
         answer_key=args.answer_key,
+        meta_key=args.meta_key,
     )
 
     exit(0 if success else 1)
