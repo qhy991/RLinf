@@ -32,7 +32,7 @@ runner:
 
   resume_dir: null
   experiment_name: kernelbench-grpo-qwen3-4b
-  output_dir: /mnt/data/qinhaiyan/rlinf_results
+  output_dir: /home/qinhaiyan/rlinf_results
 
 algorithm:
   group_size: 2
@@ -180,7 +180,7 @@ actor:
 
     position_embedding_type: rope
 
-    apply_rope_fusion: True
+    apply_rope_fusion: False
     bias_dropout_fusion: False
     persist_layer_norm: False
     bias_activation_fusion: False
@@ -225,6 +225,12 @@ actor:
     padding_side: 'right'
 
   megatron:
+    skip_train: false
+    use_megatron_fsdp: false
+    ddp_reduce_scatter_with_fp32_accumulation: false
+    dump_param_to_param_group_map: null
+    load_main_params_from_ckpt: false
+    checkpoint_id: kernelbench_grpo_qwen3_4b
     ddp_bucket_size: null
     distributed_backend: nccl # Support 'nccl' and 'gloo'
     distributed_timeout_minutes: 30
