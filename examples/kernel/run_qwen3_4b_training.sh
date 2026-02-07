@@ -17,16 +17,29 @@ MEGATRON_PATH=/opt/Megatron-LM
 # 强制使用 .venv（已安装 transformers 和 sglang）
 # conda 环境磁盘空间不足，无法安装 transformers
 if [ -f "${REPO_PATH}/.venv/bin/activate" ]; then
-    # 先取消激活 conda（如果已激活）
-    if [ -n "${CONDA_DEFAULT_ENV:-}" ]; then
+    # 彻底清理 conda 环境变量（防止 .zshrc 自动激活的影响）
+    unset CONDA_DEFAULT_ENV
+    unset CONDA_PREFIX
+    unset CONDA_PROMPT_MODIFIER
+    unset CONDA_PYTHON_EXE
+    unset CONDA_SHLVL
+    unset _CONDA_ROOT
+    # 取消激活 conda（如果已激活）
+    if command -v conda &> /dev/null; then
         conda deactivate 2>/dev/null || true
     fi
-    # 从 PATH 中移除 conda 环境
-    export PATH=$(echo $PATH | tr ':' '\n' | grep -v "/mnt/data/qinhaiyan/miniconda3" | tr '\n' ':' | sed 's/:$//')
+    # 从 PATH 中移除所有 conda 相关路径
+    export PATH=$(echo $PATH | tr ':' '\n' | grep -v "/mnt/data/qinhaiyan/miniconda3" | grep -v "conda" | tr '\n' ':' | sed 's/:$//' | sed 's/^://')
+    # 激活 .venv
     source ${REPO_PATH}/.venv/bin/activate
     echo "已激活虚拟环境: ${REPO_PATH}/.venv"
     echo "Python 路径: $(which python)"
     echo "Python 版本: $(python --version)"
+    # 验证确实使用的是 .venv 的 Python
+    if [[ "$(which python)" != *".venv"* ]]; then
+        echo "❌ 错误: Python 路径不包含 .venv，当前路径: $(which python)"
+        exit 1
+    fi
 else
     echo "错误: 找不到 .venv 环境"
     exit 1
