@@ -12,7 +12,8 @@ export RAY_DEDUP_LOGS=0
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_PATH=$(dirname $(dirname "$SCRIPT_DIR"))  # examples/kernel -> examples -> RLinf
 CONFIG_PATH="${REPO_PATH}/examples/reasoning/config/kernel"
-MEGATRON_PATH=/opt/Megatron-LM
+# Megatron-LM 已从 GitHub 克隆到 /tmp/Megatron-LM
+MEGATRON_PATH=/tmp/Megatron-LM
 
 # 强制使用 .venv（已安装 transformers 和 sglang）
 # conda 环境磁盘空间不足，无法安装 transformers
@@ -47,7 +48,7 @@ fi
 
 PYTHON_CMD="python"
 
-# 设置 PYTHONPATH，包含 RLinf 和 robust-kbench（RLinf 必须在最前面）
+# 设置 PYTHONPATH，包含 RLinf、Megatron-LM 和 robust-kbench（RLinf 必须在最前面）
 ROBUST_KBENCH_PATH=/home/qinhaiyan/robust-kbench
 export PYTHONPATH=${REPO_PATH}:${MEGATRON_PATH}:${ROBUST_KBENCH_PATH}:$PYTHONPATH
 

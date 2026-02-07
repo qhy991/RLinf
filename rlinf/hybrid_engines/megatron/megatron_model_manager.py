@@ -97,10 +97,12 @@ def get_specs(spec_name, transformer_config=None, use_te=False):
     name_spec_dict = {
         "decoder_gpt": get_gpt_decoder_block_spec(transformer_config, use_te),
         "local_gpt": get_gpt_layer_local_spec(num_experts, moe_grouped_gemm),
-        "te_gpt": get_gpt_layer_with_transformer_engine_spec(
-            num_experts, moe_grouped_gemm, qk_layernorm=transformer_config.qk_layernorm
-        ),
     }
+    # Only add te_gpt if Transformer Engine is available
+    if HAVE_TE:
+        name_spec_dict["te_gpt"] = get_gpt_layer_with_transformer_engine_spec(
+            num_experts, moe_grouped_gemm, qk_layernorm=transformer_config.qk_layernorm
+        )
     if spec_name not in name_spec_dict:
         raise ValueError(f"Spec name '{spec_name}' is not recognized.")
     return name_spec_dict[spec_name]
@@ -151,7 +153,7 @@ class MegatronModelManager:
             checkpointing_context=self.checkpoint_context,
         )
 
-    def model_provider_func(self, pre_process, post_process):
+    def model_provider_func(self, pre_process, post_process, config=None, pg_collection=None, vp_stage=None):
         """Model depends on pipeline paralellism."""
         use_te = HAVE_TE
 

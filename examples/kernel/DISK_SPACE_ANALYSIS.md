@@ -76,7 +76,50 @@ conda config --set croot /path/to/larger/disk/conda-bld
 
 ## 当前状态
 
-✅ **已采用方案 1**: 训练脚本已更新为强制使用 `.venv` 环境，避免 conda 环境的空间问题。
+### 问题解决进展（2026-02-07）
+
+**磁盘空间问题**: ✅ 已解决
+- 主分区可用: 219T（充足）
+- Inode 使用率: 27%（充足）
+- `/mnt/data/qinhaiyan` 用户配额已满，输出目录改为 `/home/qinhaiyan/rlinf_results`
+
+**环境配置**: ✅ 已完成
+- `.venv` 已安装: `transformers@4.51.1`, `sglang@0.4.6.post5`, `vllm@0.8.5`, `ray@2.47.0`
+- Megatron-LM 已克隆到 `/tmp/Megatron-LM`
+- OpenTelemetry 版本: 1.26.0（兼容 vllm）
+- 训练脚本已强制使用 `.venv`，清理了所有 conda 环境变量
+
+**训练初始化状态**: ⚠️ 部分成功
+- ✅ vLLM Rollout Worker: 已成功初始化
+- ✅ HF to Megatron checkpoint 转换: 成功
+- ✅ CUDA Graph 编译: 成功（使用缓存）
+- ❌ MegatronActor: `model_provider_func()` 兼容性问题
+
+### 当前错误
+
+```
+TypeError: MegatronModelManager.model_provider_func() got an unexpected keyword argument 'config'
+```
+
+这是 RLinf 的 MegatronModelManager 与 Megatron-LM 训练代码之间的接口不兼容问题。
+
+### 已修复的配置项
+
+1. `apply_rope_fusion: False`（无需 Transformer Engine）
+2. `skip_train: false`（Megatron 训练参数）
+3. `output_dir: /home/qinhaiyan/rlinf_results`（磁盘配额问题）
+
+### 运行命令
+
+```bash
+./examples/kernel/run_qwen3_4b_training.sh
+```
+
+### 后续建议
+
+1. 检查 RLinf 是否有针对此 Megatron-LM 版本的修复
+2. 或使用 RLinf 推荐的 Docker 镜像
+3. 或联系 RLinf 维护者确认 Megatron-LM 版本兼容性
 
 ## 检查命令
 
