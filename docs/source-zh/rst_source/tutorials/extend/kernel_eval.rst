@@ -47,9 +47,12 @@
 --------
 
 1. 在入口脚本中使用 ``get_reward_worker(cfg)`` 选择 ``KernelRewardWorker``。
-2. ``KernelRewardWorker`` 需要每个样本在 ``answers`` 中提供 ``task_dir``（字典形式），例如::
+2. ``KernelRewardWorker`` 需要每个样本提供 ``task_dir``。你可以放在 ``answers``（字典）
+   或单独放在 ``meta`` 字段并在数据配置里启用 ``data.meta_key``。示例::
 
      answers = [{"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}]
+     meta = {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}
+     data.meta_key: meta
 
 3. ``KernelRewardWorker`` 默认使用进程内评估器（``KernelEvalClient``），但仍会通过子进程隔离执行。
 4. （可选）启动独立的 ``KernelEvalWorker`` 作为评估通道，以便自定义调度。

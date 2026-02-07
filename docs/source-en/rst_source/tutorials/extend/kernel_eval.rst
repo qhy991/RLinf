@@ -48,10 +48,13 @@ Usage Notes
 -----------
 
 1. In your entrypoint, use ``get_reward_worker(cfg)`` to select ``KernelRewardWorker``.
-2. ``KernelRewardWorker`` expects each sample to include a ``task_dir`` in ``answers``
-   (as a dict). Example::
+2. ``KernelRewardWorker`` expects each sample to include a ``task_dir``. You can
+   provide it in ``answers`` (dict) or in a separate ``meta`` field and enable
+   ``data.meta_key`` in the dataset config. Examples::
 
      answers = [{"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}]
+     meta = {"task_dir": "/path/to/robust-kbench/tasks/kernelbench/level_2/task_7"}
+     data.meta_key: meta
 
 3. ``KernelRewardWorker`` uses an in-process evaluator by default (``KernelEvalClient``)
    that still executes kernels in subprocesses for isolation.

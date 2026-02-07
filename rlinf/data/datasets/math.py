@@ -74,6 +74,7 @@ class MathDataset(Dataset):
         self.tokenizer = tokenizer
         self.prompt_key = config.data.prompt_key
         self.answer_key = config.data.answer_key
+        self.meta_key = config.data.get("meta_key")
         self.apply_chat_template = config.data.apply_chat_template
 
         self.data = self._load_data()
@@ -151,6 +152,9 @@ class MathDataset(Dataset):
 
         prompt = self.data[idx][self.prompt_key]
         answer = self.data[idx][self.answer_key]
+        meta = None
+        if self.meta_key:
+            meta = self.data[idx].get(self.meta_key)
 
         # if answer is a string, convert it to a list
         if isinstance(answer, str):
@@ -178,5 +182,6 @@ class MathDataset(Dataset):
             answer=answer,
             idx=idx,
             image_data=[],
+            meta=meta,
         )
         return output

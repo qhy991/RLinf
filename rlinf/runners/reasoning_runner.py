@@ -331,6 +331,11 @@ class ReasoningRunner:
         prompt_ids = batch["prompt"].tolist()
         lengths = batch["length"].tolist()
         answers = batch["answer"]
+        if (
+            self.cfg.reward.reward_type == "kernel"
+            and (meta_list := batch.get("meta")) is not None
+        ):
+            answers = self._merge_kernel_metadata(answers, meta_list)
         image_data = batch["image_data"]
         multi_modal_inputs = batch["multi_modal_inputs"]
         prompt_ids = [ids[-pmp_len:] for ids, pmp_len in zip(prompt_ids, lengths)]
@@ -361,6 +366,36 @@ class ReasoningRunner:
         self.actor.sync_model_to_rollout()
         self.rollout.sync_model_from_actor().wait()
         self.actor.del_reshard_state_dict().wait()
+
+    @staticmethod
+    def _merge_kernel_metadata(
+        answers: list, meta_list: list
+    ) -> list[dict | str | list]:
+        """Merge kernel task metadata into answers for kernel reward."""
+        merged = []
+        for answer, meta in zip(answers, meta_list, strict=False):
+            if not isinstance(meta, dict) or meta is None:
+                merged.append(answer)
+                continue
+
+            payload = dict(meta)
+            if isinstance(answer, dict):
+                payload.update(answer)
+                merged.append(payload)
+                continue
+            if isinstance(answer, list):
+                if answer:
+                    payload.setdefault("reference_code", answer[0])
+                payload.setdefault("reference_codes", answer)
+                merged.append(payload)
+                continue
+            if isinstance(answer, str):
+                payload.setdefault("reference_code", answer)
+                merged.append(payload)
+                continue
+
+            merged.append(payload)
+        return merged
 
     def run(self):
         epoch_iter = range(self.epoch, self.cfg.runner.max_epochs)
